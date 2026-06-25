@@ -1,0 +1,40 @@
+{
+  "anomalies": [
+    "Device selection matched validation intent: GPU unavailable; CPU fallback used. This is not GPU validation evidence."
+  ],
+  "artifact_paths": {
+    "benchmark_results": "examples/example_results.json",
+    "system_info": "synthetic system_info.json not included",
+    "telemetry": "examples/example_telemetry.csv",
+    "validation_report": "examples/example_validation_report.md"
+  },
+  "classification": "PASS WITH WARNINGS",
+  "criteria": [
+    {
+      "criterion": "Device selection matched validation intent",
+      "evidence": "GPU unavailable; CPU fallback used. This is not GPU validation evidence.",
+      "status": "WARN"
+    },
+    {
+      "criterion": "Benchmark completed without runtime crash",
+      "evidence": "status=completed",
+      "status": "PASS"
+    },
+    {
+      "criterion": "Telemetry samples were captured",
+      "evidence": "2 sample(s)",
+      "status": "PASS"
+    }
+  ],
+  "telemetry_summary": {
+    "average_cpu_percent": 15.3,
+    "gpu_sample_count": 0,
+    "gpu_telemetry_available": false,
+    "peak_gpu_temperature_c": null,
+    "sample_count": 2
+  },
+  "thresholds": {
+    "min_gpu_utilization_percent": 50.0,
+    "temperature_threshold_c": 85.0
+  }
+}

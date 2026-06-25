@@ -23,6 +23,12 @@ def _fmt(value: Any, suffix: str = "", precision: int = 2) -> str:
     return f"{numeric:.{precision}f}{suffix}"
 
 
+def _text(value: Any) -> Any:
+    if value is None or value == "":
+        return "N/A"
+    return value
+
+
 def _numeric_values(rows: list[dict[str, str]], field: str) -> list[float]:
     values: list[float] = []
     for row in rows:
@@ -251,7 +257,7 @@ def generate_report(
         f"- Resource profile: {results.get('resource_profile', 'N/A')}",
         f"- Evidence scope: {_evidence_scope(device_used, telemetry_summary['gpu_telemetry_available'])}",
         f"- Random seed: {results.get('parameters', {}).get('seed', 'N/A')}",
-        f"- GPU index selected: {results.get('gpu_index', 'N/A')}",
+        f"- GPU index selected: {_text(results.get('gpu_index'))}",
         "",
         "## System Under Test",
         "",
@@ -265,7 +271,7 @@ def generate_report(
         f"- GPU count from PyTorch: {system_info.get('gpu_count', 'N/A')}",
         f"- GPU names from PyTorch: {system_info.get('gpu_names_detected_by_pytorch', [])}",
         f"- NVIDIA GPU inventory from nvidia-smi: {system_info.get('nvidia_gpu_inventory', [])}",
-        f"- NVIDIA driver: {system_info.get('nvidia_driver_version', 'N/A')}",
+        f"- NVIDIA driver: {_text(system_info.get('nvidia_driver_version'))}",
         "",
         "## Software Stack",
         "",
@@ -273,9 +279,9 @@ def generate_report(
         f"- PyTorch installed: {system_info.get('pytorch_installed', 'N/A')}",
         f"- PyTorch version: {system_info.get('pytorch_version', 'N/A')}",
         f"- CUDA available from PyTorch: {system_info.get('cuda_available_from_pytorch', 'N/A')}",
-        f"- PyTorch CUDA version: {system_info.get('pytorch_cuda_version', 'N/A')}",
-        f"- cuDNN version: {system_info.get('cudnn_version', 'N/A')}",
-        f"- CUDA version from nvidia-smi: {system_info.get('nvidia_cuda_version_from_smi', 'N/A')}",
+        f"- PyTorch CUDA version: {_text(system_info.get('pytorch_cuda_version'))}",
+        f"- cuDNN version: {_text(system_info.get('cudnn_version'))}",
+        f"- CUDA version from nvidia-smi: {_text(system_info.get('nvidia_cuda_version_from_smi'))}",
         "",
         "## Benchmark Workload",
         "",

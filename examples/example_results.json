@@ -1,10 +1,13 @@
 {
+  "cuda_available": false,
+  "device_label": "cpu",
   "device_requested": "auto",
   "device_used": "cpu",
   "end_time": "2026-01-01T00:01:11+00:00",
   "error_message": null,
   "error_type": null,
   "fallback_used": true,
+  "gpu_index": null,
   "latency_statistics_ms": {
     "average_ms": 2.15,
     "count": 465,
@@ -22,10 +25,16 @@
     "nvidia-smi not found; GPU telemetry unavailable."
   ],
   "parameters": {
+    "gpu_index": 0,
     "matrix_size": 128,
-    "telemetry_interval": 1
+    "matmul_dtype": "float32",
+    "min_gpu_utilization_percent": 50.0,
+    "seed": 1234,
+    "telemetry_interval": 1.0,
+    "temperature_threshold_c": 85.0
   },
   "requested_duration_seconds": 1,
+  "resource_profile": "Compute-heavy with predictable matrix memory footprint.",
   "start_time": "2026-01-01T00:01:10+00:00",
   "status": "completed",
   "throughput": {
@@ -36,5 +45,6 @@
   "total_iterations": 465,
   "total_units_processed": 465,
   "unit_name": "matrix_multiplications",
+  "validation_focus": "Dense GEMM throughput, tensor-core or SIMD utilization, memory allocation stability.",
   "workload": "matmul"
 }

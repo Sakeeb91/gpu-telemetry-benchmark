@@ -8,15 +8,17 @@ This is a synthetic sample report for documentation only. It demonstrates the ex
 - Workload: `matmul`
 - Device used: `cpu`
 - Status: `completed`
+- Duration: 1.00 s
 - Primary throughput: 465.00 matmuls/sec
+- Engineering assessment: Run is useful for workflow verification only; it is not GPU hardware validation evidence.
 
-## System Under Test
+## Validation Scope
 
-- Hostname: `sample-host`
-- OS: Generic Linux sample
-- CPU: Generic CPU
-- GPU count from PyTorch: 0
-- NVIDIA driver: N/A
+- Validation focus: Dense GEMM throughput, tensor-core or SIMD utilization, memory allocation stability.
+- Resource profile: Compute-heavy with predictable matrix memory footprint.
+- Evidence scope: CPU-only software workflow validation; no GPU hardware behavior validated.
+- Random seed: 1234
+- GPU index selected: N/A
 
 ## Results Summary
 
@@ -35,8 +37,15 @@ This is a synthetic sample report for documentation only. It demonstrates the ex
 
 ## Detected Anomalies
 
-- GPU unavailable; CPU fallback used.
-- GPU telemetry was unavailable or telemetry-limited for this run.
+- Device selection matched validation intent: GPU unavailable; CPU fallback used. This is not GPU validation evidence.
+
+## Pass/Fail Criteria
+
+| Criterion | Status | Evidence |
+| --- | --- | --- |
+| Device selection matched validation intent | WARN | GPU unavailable; CPU fallback used. This is not GPU validation evidence. |
+| Benchmark completed without runtime crash | PASS | status=completed |
+| Telemetry samples were captured | PASS | 2 sample(s) |
 
 ## Limitations
 
