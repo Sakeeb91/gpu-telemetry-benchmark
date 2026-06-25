@@ -61,6 +61,39 @@ def _nvidia_smi_l() -> str | None:
     return stdout
 
 
+def _nvidia_gpu_inventory() -> list[dict[str, str]]:
+    fields = [
+        "index",
+        "name",
+        "uuid",
+        "pci.bus_id",
+        "driver_version",
+        "memory.total",
+        "power.limit",
+    ]
+    code, stdout, _ = run_command(
+        ["nvidia-smi", f"--query-gpu={','.join(fields)}", "--format=csv,noheader,nounits"],
+        5,
+    )
+    if code != 0 or not stdout:
+        return []
+    import csv
+
+    inventory: list[dict[str, str]] = []
+    output_names = [
+        "index",
+        "name",
+        "uuid",
+        "pci_bus_id",
+        "driver_version",
+        "memory_total_mb",
+        "power_limit_w",
+    ]
+    for row in csv.reader(stdout.splitlines()):
+        inventory.append({name: value.strip() for name, value in zip(output_names, row, strict=False)})
+    return inventory
+
+
 def _nvidia_cuda_version() -> str | None:
     code, stdout, _ = run_command(["nvidia-smi"], 5)
     if code != 0 or not stdout:
@@ -126,6 +159,7 @@ def collect_system_info() -> dict[str, Any]:
         "nvidia_driver_version": _nvidia_driver_version(),
         "nvidia_cuda_version_from_smi": _nvidia_cuda_version(),
         "nvidia_smi_l": _nvidia_smi_l(),
+        "nvidia_gpu_inventory": _nvidia_gpu_inventory(),
     }
     info.update(_torch_info())
     return info

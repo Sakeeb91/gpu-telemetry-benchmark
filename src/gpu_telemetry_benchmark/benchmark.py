@@ -29,6 +29,7 @@ from .workloads import (
     empty_cuda_cache_if_needed,
     reset_peak_memory,
     resolve_device,
+    set_torch_seed,
     synchronize_if_needed,
 )
 
@@ -40,17 +41,25 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--workload", required=True, help="matmul, conv2d, or transformer")
     parser.add_argument("--device", choices=["auto", "cpu", "cuda"], default="auto")
+    parser.add_argument("--gpu-index", type=int, default=0, help="CUDA device index used for auto/cuda runs.")
     parser.add_argument("--duration-seconds", type=float, default=60.0)
     parser.add_argument("--warmup-seconds", type=float, default=10.0)
     parser.add_argument("--telemetry-interval", type=float, default=1.0)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--matrix-size", type=int, default=4096)
+    parser.add_argument(
+        "--matmul-dtype",
+        choices=["float32", "float16", "bfloat16"],
+        default="float32",
+        help="Tensor dtype for the matmul workload.",
+    )
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--input-size", type=int, default=224)
     parser.add_argument("--sequence-length", type=int, default=512)
     parser.add_argument("--hidden-dim", type=int, default=256)
     parser.add_argument("--num-heads", type=int, default=8)
     parser.add_argument("--num-layers", type=int, default=2)
+    parser.add_argument("--seed", type=int, default=1234)
     parser.add_argument("--sweep-batch-sizes", default=None)
     parser.add_argument("--temperature-threshold-c", type=float, default=85.0)
     parser.add_argument("--min-gpu-utilization-percent", type=float, default=50.0)
@@ -64,6 +73,7 @@ def validate_args(args: argparse.Namespace) -> None:
     validate_positive("--duration-seconds", args.duration_seconds)
     validate_non_negative("--warmup-seconds", args.warmup_seconds)
     validate_positive("--telemetry-interval", args.telemetry_interval)
+    validate_non_negative("--gpu-index", args.gpu_index)
     validate_positive("--matrix-size", args.matrix_size)
     validate_positive("--batch-size", args.batch_size)
     validate_positive("--input-size", args.input_size)
@@ -77,13 +87,16 @@ def validate_args(args: argparse.Namespace) -> None:
 
 def _parameters_from_args(args: argparse.Namespace) -> dict[str, Any]:
     return {
+        "gpu_index": args.gpu_index,
         "matrix_size": args.matrix_size,
+        "matmul_dtype": args.matmul_dtype,
         "batch_size": args.batch_size,
         "input_size": args.input_size,
         "sequence_length": args.sequence_length,
         "hidden_dim": args.hidden_dim,
         "num_heads": args.num_heads,
         "num_layers": args.num_layers,
+        "seed": args.seed,
         "telemetry_interval": args.telemetry_interval,
         "temperature_threshold_c": args.temperature_threshold_c,
         "min_gpu_utilization_percent": args.min_gpu_utilization_percent,
@@ -95,6 +108,8 @@ def _base_results(args: argparse.Namespace, run_dir: Path) -> dict[str, Any]:
         "workload": args.workload,
         "device_requested": args.device,
         "device_used": None,
+        "device_label": None,
+        "gpu_index": None,
         "parameters": _parameters_from_args(args),
         "output_dir": str(run_dir),
         "start_time": None,
@@ -142,17 +157,21 @@ def run_single_benchmark(
     telemetry.start()
 
     try:
-        resolution = resolve_device(args.device)
+        resolution = resolve_device(args.device, gpu_index=args.gpu_index)
         device = resolution.device
         results["device_used"] = resolution.device_type
+        results["device_label"] = resolution.device_label
+        results["gpu_index"] = resolution.gpu_index
         results["cuda_available"] = resolution.cuda_available
         results["fallback_used"] = resolution.fallback_used
         results["notes"].extend(resolution.notes)
+        set_torch_seed(args.seed, resolution.device_type)
 
         workload = create_workload(
             args.workload,
             device,
             matrix_size=args.matrix_size,
+            matmul_dtype=args.matmul_dtype,
             batch_size=args.batch_size,
             input_size=args.input_size,
             sequence_length=args.sequence_length,
@@ -162,6 +181,8 @@ def run_single_benchmark(
         )
         results["parameters"].update(workload.parameters)
         results["unit_name"] = workload.unit_name
+        results["validation_focus"] = workload.validation_focus
+        results["resource_profile"] = workload.resource_profile
 
         _run_warmup(workload, device, args.warmup_seconds, logger)
         reset_peak_memory(device)

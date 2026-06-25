@@ -2,7 +2,7 @@ import csv
 import json
 from pathlib import Path
 
-from gpu_telemetry_benchmark.report import generate_report
+from gpu_telemetry_benchmark.report import evaluate_run, generate_report
 
 
 def _write_json(path: Path, payload: dict) -> None:
@@ -82,3 +82,22 @@ def test_report_generation_from_fake_cpu_run(tmp_path: Path) -> None:
     assert "# Validation Report: matmul" in report_text
     assert "PASS WITH WARNINGS" in report_text
     assert "CPU fallback used" in report_text
+
+    summary = json.loads((tmp_path / "validation_summary.json").read_text(encoding="utf-8"))
+    assert summary["classification"] == "PASS WITH WARNINGS"
+    assert summary["telemetry_summary"]["sample_count"] == 1
+
+
+def test_cuda_run_without_gpu_telemetry_is_warning(tmp_path: Path) -> None:
+    (tmp_path / "telemetry.csv").write_text("timestamp,cpu_percent\n2026-01-01T00:00:01+00:00,10\n", encoding="utf-8")
+    (tmp_path / "system_info.json").write_text("{}", encoding="utf-8")
+    classification, criteria, anomalies = evaluate_run(
+        tmp_path,
+        system_info={"hostname": "unit-test"},
+        results={"status": "completed", "device_requested": "cuda", "device_used": "cuda"},
+        telemetry_rows=[{"timestamp": "2026-01-01T00:00:01+00:00", "cpu_percent": "10"}],
+    )
+
+    assert classification == "PASS WITH WARNINGS"
+    assert any("GPU telemetry was captured" in item["criterion"] for item in criteria)
+    assert any("without nvidia-smi GPU telemetry" in item for item in anomalies)

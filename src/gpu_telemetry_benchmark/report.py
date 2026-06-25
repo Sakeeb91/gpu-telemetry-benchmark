@@ -1,4 +1,4 @@
-"""Markdown validation report generation."""
+"""Markdown and machine-readable validation report generation."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import csv
 from pathlib import Path
 from typing import Any
 
-from .utils import max_numeric, mean_numeric, read_json, safe_float
+from .utils import max_numeric, mean_numeric, read_json, safe_float, write_json
 
 
 def _read_telemetry(path: Path) -> list[dict[str, str]]:
@@ -23,14 +23,29 @@ def _fmt(value: Any, suffix: str = "", precision: int = 2) -> str:
     return f"{numeric:.{precision}f}{suffix}"
 
 
+def _numeric_values(rows: list[dict[str, str]], field: str) -> list[float]:
+    values: list[float] = []
+    for row in rows:
+        value = safe_float(row.get(field))
+        if value is not None:
+            values.append(value)
+    return values
+
+
 def summarize_telemetry(rows: list[dict[str, str]]) -> dict[str, Any]:
     """Calculate report-friendly telemetry summary values."""
     gpu_rows = [row for row in rows if row.get("gpu_index", "").strip()]
+    gpu_temps = _numeric_values(gpu_rows, "temperature_gpu_c")
     return {
         "sample_count": len(rows),
         "gpu_sample_count": len(gpu_rows),
         "gpu_telemetry_available": bool(gpu_rows),
+        "first_sample_timestamp": rows[0].get("timestamp") if rows else None,
+        "last_sample_timestamp": rows[-1].get("timestamp") if rows else None,
         "peak_gpu_temperature_c": max_numeric(row.get("temperature_gpu_c") for row in gpu_rows),
+        "gpu_temperature_start_c": gpu_temps[0] if gpu_temps else None,
+        "gpu_temperature_end_c": gpu_temps[-1] if gpu_temps else None,
+        "gpu_temperature_delta_c": (gpu_temps[-1] - gpu_temps[0]) if len(gpu_temps) >= 2 else None,
         "average_gpu_utilization_percent": mean_numeric(
             row.get("utilization_gpu_percent") for row in gpu_rows
         ),
@@ -60,7 +75,21 @@ def evaluate_run(
         if status in {"WARN", "FAIL"}:
             anomalies.append(f"{name}: {evidence}")
 
+    requested_device = results.get("device_requested")
+    used_device = results.get("device_used")
     status = results.get("status")
+
+    if requested_device == "cuda" and used_device != "cuda":
+        device_status = "FAIL"
+        device_evidence = f"requested={requested_device}, used={used_device}"
+    elif requested_device == "auto" and used_device == "cpu":
+        device_status = "WARN"
+        device_evidence = "GPU unavailable; CPU fallback used. This is not GPU validation evidence."
+    else:
+        device_status = "PASS"
+        device_evidence = f"requested={requested_device}, used={used_device}"
+    add("Device selection matched validation intent", device_status, device_evidence)
+
     add(
         "Benchmark completed without runtime crash",
         "PASS" if status == "completed" else "FAIL",
@@ -74,9 +103,27 @@ def evaluate_run(
         error_type or "No OOM error recorded",
     )
 
+    add(
+        "Telemetry samples were captured",
+        "PASS" if telemetry_summary["sample_count"] > 0 else "FAIL",
+        f"{telemetry_summary['sample_count']} sample(s)",
+    )
+
+    if used_device == "cuda":
+        gpu_telemetry_status = "PASS" if telemetry_summary["gpu_telemetry_available"] else "WARN"
+        gpu_telemetry_evidence = (
+            f"{telemetry_summary['gpu_sample_count']} GPU sample(s)"
+            if telemetry_summary["gpu_telemetry_available"]
+            else "CUDA workload ran without nvidia-smi GPU telemetry"
+        )
+    else:
+        gpu_telemetry_status = "PASS"
+        gpu_telemetry_evidence = "Not required for CPU run"
+    add("GPU telemetry was captured for CUDA runs", gpu_telemetry_status, gpu_telemetry_evidence)
+
     peak_temp = telemetry_summary["peak_gpu_temperature_c"]
     if peak_temp is None:
-        temp_status = "WARN" if results.get("device_used") == "cuda" else "PASS"
+        temp_status = "WARN" if used_device == "cuda" else "PASS"
         temp_evidence = "GPU temperature unavailable" if temp_status == "WARN" else "CPU run or no GPU telemetry"
     elif peak_temp <= temperature_threshold_c:
         temp_status = "PASS"
@@ -86,8 +133,20 @@ def evaluate_run(
         temp_evidence = f"Peak {peak_temp:.2f} C > {temperature_threshold_c:.2f} C"
     add("GPU temperature stayed below threshold", temp_status, temp_evidence)
 
+    temp_delta = telemetry_summary["gpu_temperature_delta_c"]
+    if temp_delta is None:
+        runaway_status = "WARN" if used_device == "cuda" else "PASS"
+        runaway_evidence = "Insufficient GPU temperature samples" if used_device == "cuda" else "Not applicable for CPU run"
+    elif temp_delta > 15 and peak_temp is not None and peak_temp >= temperature_threshold_c - 5:
+        runaway_status = "FAIL"
+        runaway_evidence = f"Temperature rose {temp_delta:.2f} C and peak approached threshold"
+    else:
+        runaway_status = "PASS"
+        runaway_evidence = f"Temperature delta {temp_delta:.2f} C"
+    add("No thermal runaway trend detected", runaway_status, runaway_evidence)
+
     avg_util = telemetry_summary["average_gpu_utilization_percent"]
-    if results.get("device_used") == "cuda":
+    if used_device == "cuda":
         if avg_util is None:
             util_status = "WARN"
             util_evidence = "GPU utilization telemetry unavailable"
@@ -116,14 +175,9 @@ def evaluate_run(
         str(system_info_path),
     )
 
-    if results.get("device_requested") == "auto" and results.get("device_used") == "cpu":
-        anomalies.append("GPU unavailable; CPU fallback used.")
-    if results.get("device_used") == "cuda" and not telemetry_summary["gpu_telemetry_available"]:
-        anomalies.append("CUDA workload ran without GPU telemetry from nvidia-smi.")
-
     if any(item["status"] == "FAIL" for item in criteria):
         classification = "FAIL"
-    elif any(item["status"] == "WARN" for item in criteria) or anomalies:
+    elif any(item["status"] == "WARN" for item in criteria):
         classification = "PASS WITH WARNINGS"
     else:
         classification = "PASS"
@@ -136,7 +190,7 @@ def generate_report(
     temperature_threshold_c: float = 85.0,
     min_gpu_utilization_percent: float = 50.0,
 ) -> Path:
-    """Generate ``validation_report.md`` from run artifacts."""
+    """Generate ``validation_report.md`` and ``validation_summary.json`` from run artifacts."""
     run_dir = run_dir.resolve()
     system_info_path = run_dir / "system_info.json"
     results_path = run_dir / "benchmark_results.json"
@@ -160,6 +214,24 @@ def generate_report(
     throughput = results.get("throughput", {})
     latency = results.get("latency_statistics_ms", {})
 
+    validation_summary = {
+        "classification": classification,
+        "criteria": criteria,
+        "anomalies": anomalies,
+        "telemetry_summary": telemetry_summary,
+        "thresholds": {
+            "temperature_threshold_c": temperature_threshold_c,
+            "min_gpu_utilization_percent": min_gpu_utilization_percent,
+        },
+        "artifact_paths": {
+            "system_info": str(system_info_path),
+            "benchmark_results": str(results_path),
+            "telemetry": str(telemetry_path),
+            "validation_report": str(run_dir / "validation_report.md"),
+        },
+    }
+    write_json(run_dir / "validation_summary.json", validation_summary)
+
     lines = [
         f"# Validation Report: {workload}",
         "",
@@ -171,6 +243,15 @@ def generate_report(
         f"- Status: `{results.get('status', 'unknown')}`",
         f"- Duration: {_fmt(results.get('measured_duration_seconds'), ' s')}",
         f"- Primary throughput: {_fmt(throughput.get('value'))} {throughput.get('unit', '')}",
+        f"- Engineering assessment: {_assessment_sentence(classification, device_used, telemetry_summary)}",
+        "",
+        "## Validation Scope",
+        "",
+        f"- Validation focus: {results.get('validation_focus', 'N/A')}",
+        f"- Resource profile: {results.get('resource_profile', 'N/A')}",
+        f"- Evidence scope: {_evidence_scope(device_used, telemetry_summary['gpu_telemetry_available'])}",
+        f"- Random seed: {results.get('parameters', {}).get('seed', 'N/A')}",
+        f"- GPU index selected: {results.get('gpu_index', 'N/A')}",
         "",
         "## System Under Test",
         "",
@@ -183,6 +264,7 @@ def generate_report(
         f"- RAM: {system_info.get('ram_total_gb', 'N/A')} GB",
         f"- GPU count from PyTorch: {system_info.get('gpu_count', 'N/A')}",
         f"- GPU names from PyTorch: {system_info.get('gpu_names_detected_by_pytorch', [])}",
+        f"- NVIDIA GPU inventory from nvidia-smi: {system_info.get('nvidia_gpu_inventory', [])}",
         f"- NVIDIA driver: {system_info.get('nvidia_driver_version', 'N/A')}",
         "",
         "## Software Stack",
@@ -200,6 +282,7 @@ def generate_report(
         f"- Workload: `{workload}`",
         f"- Device requested: `{results.get('device_requested', 'N/A')}`",
         f"- Device used: `{device_used}`",
+        f"- Device label: `{results.get('device_label', 'N/A')}`",
         f"- Parameters: `{results.get('parameters', {})}`",
         f"- Warmup duration: {_fmt(results.get('warmup_seconds'), ' s')}",
         f"- Start time: {results.get('start_time', 'N/A')}",
@@ -222,12 +305,21 @@ def generate_report(
         "",
         f"- Telemetry samples: {telemetry_summary['sample_count']}",
         f"- GPU telemetry samples: {telemetry_summary['gpu_sample_count']}",
+        f"- First sample: {telemetry_summary['first_sample_timestamp'] or 'N/A'}",
+        f"- Last sample: {telemetry_summary['last_sample_timestamp'] or 'N/A'}",
         f"- Peak GPU temperature: {_fmt(telemetry_summary['peak_gpu_temperature_c'], ' C')}",
+        f"- GPU temperature delta: {_fmt(telemetry_summary['gpu_temperature_delta_c'], ' C')}",
         f"- Average GPU utilization: {_fmt(telemetry_summary['average_gpu_utilization_percent'], '%')}",
         f"- Peak GPU memory usage: {_fmt(telemetry_summary['peak_gpu_memory_used_mb'], ' MB')}",
         f"- Average power draw: {_fmt(telemetry_summary['average_power_draw_w'], ' W')}",
         f"- Average CPU utilization: {_fmt(telemetry_summary['average_cpu_percent'], '%')}",
         f"- Peak RAM utilization: {_fmt(telemetry_summary['peak_ram_percent'], '%')}",
+        "",
+        "## Thresholds",
+        "",
+        f"- GPU temperature threshold: {_fmt(temperature_threshold_c, ' C')}",
+        f"- Minimum average GPU utilization for CUDA runs: {_fmt(min_gpu_utilization_percent, '%')}",
+        "- GPU utilization below threshold is a warning because small or memory-bound workloads may not saturate a device.",
         "",
         "## Detected Anomalies",
         "",
@@ -265,6 +357,8 @@ def generate_report(
     lines.extend(f"- {item}" for item in limitations)
 
     lines.extend(["", "## Next Steps", ""])
+    if device_used == "cpu":
+        lines.append("- Rerun on an NVIDIA GPU host before presenting this as GPU validation evidence.")
     lines.extend(
         [
             "- Repeat the run with the same parameters to compare variance.",
@@ -285,10 +379,34 @@ def _recommendations(classification: str, anomalies: list[str], device_used: str
     if device_used == "cpu":
         recommendations.append("Run on an NVIDIA GPU host to validate GPU telemetry, power, thermal, and utilization behavior.")
     if anomalies:
-        recommendations.append("Investigate anomalies before using the run as a clean validation baseline.")
+        recommendations.append("Investigate warnings or failures before using the run as a clean validation baseline.")
     if not recommendations:
         recommendations.append("Use this run as a baseline and compare future driver, hardware, or parameter changes against it.")
     return recommendations
+
+
+def _assessment_sentence(
+    classification: str,
+    device_used: str,
+    telemetry_summary: dict[str, Any],
+) -> str:
+    if classification == "FAIL":
+        return "Run failed one or more validation criteria and should not be used as a clean baseline."
+    if device_used == "cpu":
+        return "Run is useful for workflow verification only; it is not GPU hardware validation evidence."
+    if not telemetry_summary["gpu_telemetry_available"]:
+        return "Run completed on CUDA but lacks GPU telemetry, so hardware conclusions are limited."
+    if classification == "PASS WITH WARNINGS":
+        return "Run completed but warnings require review before using it as a baseline."
+    return "Run completed with required artifacts and no detected threshold violations."
+
+
+def _evidence_scope(device_used: str, gpu_telemetry_available: bool) -> str:
+    if device_used == "cpu":
+        return "CPU-only software workflow validation; no GPU hardware behavior validated."
+    if gpu_telemetry_available:
+        return "CUDA workload with synchronized nvidia-smi and system telemetry."
+    return "CUDA workload evidence with missing or limited nvidia-smi telemetry."
 
 
 def _limitations(device_used: str, gpu_telemetry_available: bool) -> list[str]:

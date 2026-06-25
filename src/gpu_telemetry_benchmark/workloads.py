@@ -24,32 +24,72 @@ class DeviceResolution:
 
     device: Any
     device_type: str
+    device_label: str
     requested: str
     cuda_available: bool
     fallback_used: bool
+    gpu_index: int | None
     notes: list[str]
 
 
-def resolve_device(requested: str) -> DeviceResolution:
+def resolve_device(requested: str, gpu_index: int = 0) -> DeviceResolution:
     """Resolve auto/cpu/cuda device selection."""
     torch = require_torch()
     requested = requested.lower()
     if requested not in {"auto", "cpu", "cuda"}:
         raise ValueError(f"Unsupported device {requested!r}; expected auto, cpu, or cuda")
+    if gpu_index < 0:
+        raise ValueError(f"gpu_index must be non-negative, got {gpu_index}")
 
     cuda_available = bool(torch.cuda.is_available())
     notes: list[str] = []
     if requested == "cpu":
-        return DeviceResolution(torch.device("cpu"), "cpu", requested, cuda_available, False, notes)
+        if gpu_index != 0:
+            notes.append("--gpu-index is ignored for CPU runs.")
+        return DeviceResolution(torch.device("cpu"), "cpu", "cpu", requested, cuda_available, False, None, notes)
     if requested == "cuda":
         if not cuda_available:
             raise RuntimeError("CUDA was requested with --device cuda, but torch.cuda.is_available() is false.")
-        return DeviceResolution(torch.device("cuda"), "cuda", requested, cuda_available, False, notes)
+        _validate_gpu_index(torch, gpu_index)
+        return DeviceResolution(
+            torch.device(f"cuda:{gpu_index}"),
+            "cuda",
+            f"cuda:{gpu_index}",
+            requested,
+            cuda_available,
+            False,
+            gpu_index,
+            notes,
+        )
     if cuda_available:
-        return DeviceResolution(torch.device("cuda"), "cuda", requested, cuda_available, False, notes)
+        _validate_gpu_index(torch, gpu_index)
+        return DeviceResolution(
+            torch.device(f"cuda:{gpu_index}"),
+            "cuda",
+            f"cuda:{gpu_index}",
+            requested,
+            cuda_available,
+            False,
+            gpu_index,
+            notes,
+        )
 
     notes.append("GPU unavailable; CPU fallback used.")
-    return DeviceResolution(torch.device("cpu"), "cpu", requested, cuda_available, True, notes)
+    return DeviceResolution(torch.device("cpu"), "cpu", "cpu", requested, cuda_available, True, None, notes)
+
+
+def _validate_gpu_index(torch: Any, gpu_index: int) -> None:
+    gpu_count = torch.cuda.device_count()
+    if gpu_index >= gpu_count:
+        raise ValueError(f"Requested --gpu-index {gpu_index}, but PyTorch detected {gpu_count} CUDA device(s).")
+
+
+def set_torch_seed(seed: int, device_type: str) -> None:
+    """Seed PyTorch inputs so repeated runs use the same synthetic tensors."""
+    torch = require_torch()
+    torch.manual_seed(seed)
+    if device_type == "cuda":
+        torch.cuda.manual_seed_all(seed)
 
 
 def synchronize_if_needed(device: Any) -> None:
@@ -94,6 +134,8 @@ class BenchmarkWorkload:
     throughput_name = "units_per_second"
     throughput_unit = "units/sec"
     flops_per_iteration: int | None = None
+    validation_focus = "Generic workload execution."
+    resource_profile = "Synthetic workload."
 
     def __init__(self, device: Any) -> None:
         self.device = device
@@ -128,6 +170,8 @@ class MatmulWorkload(BenchmarkWorkload):
     unit_name = "matrix_multiplications"
     throughput_name = "matrix_multiplications_per_second"
     throughput_unit = "matmuls/sec"
+    validation_focus = "Dense GEMM throughput, tensor-core or SIMD utilization, memory allocation stability."
+    resource_profile = "Compute-heavy with predictable matrix memory footprint."
 
     def __init__(self, device: Any, matrix_size: int = 4096, dtype: str = "float32") -> None:
         super().__init__(device)
@@ -160,6 +204,8 @@ class Conv2DWorkload(BenchmarkWorkload):
     unit_name = "samples"
     throughput_name = "samples_per_second"
     throughput_unit = "samples/sec"
+    validation_focus = "Inference-style convolution throughput, batch-size scaling, activation memory behavior."
+    resource_profile = "Mixed compute and memory traffic with reusable model weights."
 
     def __init__(self, device: Any, batch_size: int = 32, input_size: int = 224) -> None:
         super().__init__(device)
@@ -206,6 +252,8 @@ class TransformerWorkload(BenchmarkWorkload):
     unit_name = "tokens"
     throughput_name = "tokens_per_second"
     throughput_unit = "tokens/sec"
+    validation_focus = "Attention/MLP execution, sequence-length sensitivity, token throughput."
+    resource_profile = "Memory-sensitive synthetic encoder with configurable sequence length and hidden dimension."
 
     def __init__(
         self,
@@ -278,6 +326,7 @@ def create_workload(
     device: Any,
     *,
     matrix_size: int = 4096,
+    matmul_dtype: str = "float32",
     batch_size: int = 32,
     input_size: int = 224,
     sequence_length: int = 512,
@@ -288,7 +337,7 @@ def create_workload(
     """Construct a named benchmark workload."""
     normalized = name.lower()
     if normalized == "matmul":
-        return MatmulWorkload(device=device, matrix_size=matrix_size)
+        return MatmulWorkload(device=device, matrix_size=matrix_size, dtype=matmul_dtype)
     if normalized == "conv2d":
         return Conv2DWorkload(device=device, batch_size=batch_size, input_size=input_size)
     if normalized == "transformer":

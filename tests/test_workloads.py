@@ -1,11 +1,20 @@
 import pytest
 
-from gpu_telemetry_benchmark.workloads import create_workload
+from gpu_telemetry_benchmark.workloads import create_workload, resolve_device
 
 
 def test_invalid_workload_raises_clear_error() -> None:
     with pytest.raises(ValueError, match="Invalid workload"):
         create_workload("not-a-workload", device="cpu")
+
+
+def test_cpu_resolution_ignores_gpu_index_with_note() -> None:
+    pytest.importorskip("torch")
+    resolution = resolve_device("cpu", gpu_index=2)
+
+    assert resolution.device_type == "cpu"
+    assert resolution.gpu_index is None
+    assert "--gpu-index is ignored for CPU runs." in resolution.notes
 
 
 def test_matmul_workload_initializes_on_cpu() -> None:
