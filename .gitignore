@@ -1,0 +1,23 @@
+.DS_Store
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+dist/
+build/
+
+# Runtime outputs are generated locally and should not be committed.
+outputs/*
+!outputs/.gitkeep
+
+# Local environment and editor files.
+.env
+.env.*
+.idea/
+.vscode/
