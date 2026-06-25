@@ -1,0 +1,3 @@
+timestamp,gpu_index,gpu_name,driver_version,cuda_version,temperature_gpu_c,power_draw_w,power_limit_w,utilization_gpu_percent,utilization_memory_percent,memory_total_mb,memory_used_mb,memory_free_mb,clocks_graphics_mhz,clocks_memory_mhz,pcie_link_gen_current,pcie_link_width_current,throttle_reasons,cpu_percent,ram_total_gb,ram_used_gb,ram_percent
+2026-01-01T00:01:10+00:00,,,,,,,,,,,,,,,,,,12.5,16.0,6.4,40.0
+2026-01-01T00:01:11+00:00,,,,,,,,,,,,,,,,,,18.1,16.0,6.5,40.6

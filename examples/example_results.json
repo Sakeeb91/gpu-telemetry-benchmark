@@ -1,0 +1,40 @@
+{
+  "device_requested": "auto",
+  "device_used": "cpu",
+  "end_time": "2026-01-01T00:01:11+00:00",
+  "error_message": null,
+  "error_type": null,
+  "fallback_used": true,
+  "latency_statistics_ms": {
+    "average_ms": 2.15,
+    "count": 465,
+    "max_ms": 3.92,
+    "min_ms": 1.84,
+    "p50_ms": 2.11,
+    "p95_ms": 2.88,
+    "p99_ms": 3.44
+  },
+  "measured_duration_seconds": 1.0,
+  "memory_metrics": {},
+  "notes": [
+    "Synthetic sample output for documentation only.",
+    "GPU unavailable; CPU fallback used.",
+    "nvidia-smi not found; GPU telemetry unavailable."
+  ],
+  "parameters": {
+    "matrix_size": 128,
+    "telemetry_interval": 1
+  },
+  "requested_duration_seconds": 1,
+  "start_time": "2026-01-01T00:01:10+00:00",
+  "status": "completed",
+  "throughput": {
+    "metric_name": "matrix_multiplications_per_second",
+    "unit": "matmuls/sec",
+    "value": 465.0
+  },
+  "total_iterations": 465,
+  "total_units_processed": 465,
+  "unit_name": "matrix_multiplications",
+  "workload": "matmul"
+}
